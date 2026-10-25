@@ -1,0 +1,58 @@
+name: Verify and deploy Social Tennis
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: dotnet restore SocialTennis.slnx
+      - run: dotnet build SocialTennis.slnx -c Debug --no-restore
+      - run: dotnet build SocialTennis.slnx -c Release --no-restore
+      - run: dotnet format SocialTennis.slnx --verify-no-changes --severity info --no-restore
+      - run: pwsh tests/SocialTennis.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps webkit
+      - run: dotnet test SocialTennis.slnx -c Release --no-build
+      - name: Stamp and publish deployment
+        if: github.ref == 'refs/heads/master'
+        env:
+          DEPLOY_NUMBER: ${{ github.run_number }}
+          BUILD_COMMIT: ${{ github.sha }}
+          REPOSITORY: ${{ github.event.repository.name }}
+        run: |
+          python3 scripts/publish.py --base "/$REPOSITORY/" --version "1.0.$DEPLOY_NUMBER" --commit "${BUILD_COMMIT:0:7}" --date "$(date -u '+%-d %B %Y')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-screenshots
+          path: artifacts/*.png
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/master'
+        with:
+          path: artifacts/site/wwwroot
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy static site
+        id: deployment
+        uses: actions/deploy-pages@v4

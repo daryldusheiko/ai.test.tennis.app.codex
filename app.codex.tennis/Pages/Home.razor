@@ -1,7 +1,12 @@
-﻿@page "/"
+@page "/"
+@inject NavigationManager Navigation
 
-<PageTitle>Home</PageTitle>
+<p role="status">Loading…</p>
 
-<h1>Hello, world!</h1>
-
-Welcome to your new app.
+@code {
+    protected override void OnInitialized()
+    {
+        // Task 1 has no schedules yet. Only the entry route redirects.
+        Navigation.NavigateTo("players", replace: true);
+    }
+}

@@ -1,0 +1,47 @@
+@page "/about"
+@inject IJSRuntime JavaScript
+
+<PageTitle>Social Tennis</PageTitle>
+<header><p class="eyebrow">SOCIAL TENNIS</p><h1>About</h1></header>
+<section class="card">
+    <img src="icons/tennis-192.png" alt="" width="64" height="64" />
+    <h2>Social Tennis</h2>
+    <p>Version @BuildDetails.Version (@BuildDetails.Commit)</p>
+    <p>@BuildDetails.Release</p>
+    <label for="theme">Theme</label>
+    <select id="theme" value="@_theme" @onchange="ChangeThemeAsync">
+        <option>Device</option>
+        <option>Light</option>
+        <option>Dark</option>
+    </select>
+</section>
+<section class="card">
+    <h2>How to use</h2>
+    <ol>
+        <li><strong>Players:</strong> add everyone once (or Import a list); names are remembered on the phone.</li>
+        <li><strong>Schedule:</strong> Create schedule, enter the court numbers, add today's players by typing the first letters of their names.</li>
+        <li><strong>Review:</strong> six rounds with no repeat partners; leftover players play a three-player game or singles; drag (||) to reorder; Edit to add a player; press and hold to pin, unpin, swap or remove; Re-schedule fixes red clashes.</li>
+        <li><strong>Play:</strong> Play shows the schedule on the Play page; each round's ⋮ button starts, finishes or cancels it; blue, green and grey balls.</li>
+        <li><strong>Finish:</strong> Close schedule on the Play page when the session is over; players are kept.</li>
+    </ol>
+    <p>The app works offline once installed (Safari → Share → Add to Home Screen). Save a backup from the Players page now and then.</p>
+</section>
+
+@code {
+    private string _theme = "Device";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _theme = await JavaScript.InvokeAsync<string>("tennisTheme.get");
+            StateHasChanged();
+        }
+    }
+
+    private async Task ChangeThemeAsync(ChangeEventArgs args)
+    {
+        _theme = args.Value?.ToString() ?? "Device";
+        await JavaScript.InvokeVoidAsync("tennisTheme.set", _theme);
+    }
+}

@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/SocialTennis.Tests/SocialTennis.Tests.csproj" />
+  </Folder>
+  <Project Path="app.codex.tennis/app.codex.tennis.csproj" />
+</Solution>
