@@ -1,12 +1,22 @@
 @page "/"
 @inject NavigationManager Navigation
+@inject IScheduleStorage Storage
 
-<p role="status">Loading…</p>
+<p role="status">@(_error ?? "Loading…")</p>
 
 @code {
-    protected override void OnInitialized()
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
     {
-        // Task 1 has no schedules yet. Only the entry route redirects.
-        Navigation.NavigateTo("players", replace: true);
+        try
+        {
+            Session? session = await Storage.LoadAsync();
+            Navigation.NavigateTo(session is { InPlay: true } ? "play" : "players", replace: true);
+        }
+        catch (Exception exception) when (exception is JSException or System.Text.Json.JsonException)
+        {
+            _error = "Couldn't load the schedule. Reload to try again.";
+        }
     }
 }

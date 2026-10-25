@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Playwright;
 using NUnit.Framework;
+using SocialTennis.Players;
 using static Microsoft.Playwright.Assertions;
 
 namespace SocialTennis.Tests;
@@ -214,6 +215,11 @@ public sealed class PwaTests
         await page.GetByLabel("Theme", new() { Exact = true }).SelectOptionAsync("Dark");
         await page.GetByRole(AriaRole.Link, new() { Name = "Players", Exact = true }).ClickAsync();
         await AddPlayerAsync(page, "Upgrade", "Player");
+        Player[] savedPlayers = SocialTennis.Players.PlayerDataJson.Deserialize(await page.EvaluateAsync<string>("() => localStorage.getItem('social-tennis-players')")).Players;
+        Player[] sessionPlayers = [.. savedPlayers, .. ScheduleTests.Players(3)];
+        var savedSession = new SocialTennis.Scheduling.Session(1, SocialTennis.Scheduling.ScheduleStep.Review, [4], sessionPlayers, SocialTennis.Scheduling.ScheduleEngine.Generate(sessionPlayers, 1, 42), true);
+        string scheduleJson = SocialTennis.Scheduling.SessionJson.Serialize(savedSession);
+        await page.EvaluateAsync("json => localStorage.setItem('social-tennis-schedule', json)", scheduleJson);
         await page.WaitForFunctionAsync("() => navigator.serviceWorker.controller !== null");
         string previousCache = await page.EvaluateAsync<string>("async () => (await caches.keys()).find(key => key.startsWith('social-tennis-'))");
         await StopServerAsync();
@@ -245,6 +251,9 @@ public sealed class PwaTests
         await StopServerAsync();
         await reopened.ReloadAsync();
         await Expect(reopened.GetByText("Version 1.0.43 (def5678)")).ToBeVisibleAsync();
+        await reopened.GetByRole(AriaRole.Link, new() { Name = "Play", Exact = true }).ClickAsync();
+        await Expect(reopened.GetByText("Upgrade Player", new() { Exact = true }).First).ToBeVisibleAsync();
+        Assert.That(await reopened.EvaluateAsync<string>("() => localStorage.getItem('social-tennis-schedule')"), Is.EqualTo(scheduleJson));
     }
 
     /// <summary>
@@ -400,6 +409,199 @@ public sealed class PwaTests
         await page.GetByRole(AriaRole.Link, new() { Name = "‹ Players", Exact = true }).ClickAsync();
         await Expect(page.GetByText("Couldn't load players. Please try again.")).ToBeVisibleAsync();
         await Expect(page.GetByRole(AriaRole.Link, new() { Name = "Add player", Exact = true })).ToHaveCountAsync(0);
+    }
+
+    /// <summary>Exercises setup, real dragging, persistence, and offline play on iPhone SE.</summary>
+    [TestCase("Light")]
+    [TestCase("Dark")]
+    public async Task Schedule_CreateReorderAndPlay_PersistsOfflineAsync(string theme)
+    {
+        IPage page = await OpenAsync("about");
+        await page.GetByLabel("Theme", new() { Exact = true }).SelectOptionAsync(theme);
+        await page.GetByRole(AriaRole.Link, new() { Name = "Players", Exact = true }).ClickAsync();
+        foreach (string name in new[] { "Ann", "Bob", "Cara", "Dan", "Eve", "Finn", "Gail", "Hugh" })
+        {
+            await AddPlayerAsync(page, name, "Tennis");
+        }
+
+        await page.GetByRole(AriaRole.Link, new() { Name = "Schedule", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create schedule", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Alert)).ToHaveTextAsync("Enter at least one court number, for example 4,5,6.");
+        await page.GetByLabel("Select courts", new() { Exact = true }).FillAsync("5,4");
+        await page.GetByLabel("Select courts", new() { Exact = true }).PressAsync("Enter");
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true })).ToBeDisabledAsync();
+        foreach (string name in new[] { "Ann", "Bob", "Cara", "Dan", "Eve", "Finn", "Gail", "Hugh" })
+        {
+            await page.GetByLabel("Add players", new() { Exact = true }).FillAsync(name[..1]);
+            await page.GetByRole(AriaRole.Button, new() { Name = name + " Tennis", Exact = true }).ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true }).ClickAsync();
+        }
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Remove Hugh Tennis", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Playing (7)", Exact = true })).ToBeVisibleAsync();
+        await page.ReloadAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Playing (7)", Exact = true })).ToBeVisibleAsync();
+        await page.GetByLabel("Add players", new() { Exact = true }).FillAsync("H");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Hugh Tennis", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Back", Exact = true }).ClickAsync();
+        await Expect(page.GetByLabel("Select courts", new() { Exact = true })).ToHaveValueAsync("4,5");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Review schedule", Exact = true })).ToBeVisibleAsync();
+        Assert.That(await page.Locator("[data-round]").CountAsync(), Is.EqualTo(6));
+        Assert.That(await page.GetByText("Court 4", new() { Exact = true }).CountAsync(), Is.Zero);
+        string firstGame = await page.Locator("[data-round='0'] [data-game='0']").InnerTextAsync();
+        await DragScheduleAsync(page, page.GetByRole(AriaRole.Button, new() { Name = "Move game 1 in round 1", Exact = true }), page.Locator("[data-round='0'] [data-game='1']"));
+        await Expect(page.Locator("[data-round='0'] [data-game='1']")).ToHaveTextAsync(firstGame, new() { UseInnerText = true });
+        string firstRound = await page.Locator("[data-round='0'] [data-game='0']").InnerTextAsync();
+        await DragScheduleAsync(page, page.GetByRole(AriaRole.Button, new() { Name = "Move round 1", Exact = true }), page.Locator("[data-round='1']"));
+        await Expect(page.Locator("[data-round='1'] [data-game='0']")).ToHaveTextAsync(firstRound, new() { UseInnerText = true });
+        await page.ScreenshotAsync(new() { Path = Path.Combine(_root, $"artifacts/task3-review-{theme}.png"), FullPage = true });
+        Assert.That(await page.EvaluateAsync<bool>("document.documentElement.scrollWidth <= innerWidth"), Is.True);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Play", Exact = true }).ClickAsync();
+        await Expect(page.GetByText("Court 4", new() { Exact = true }).First).ToBeVisibleAsync();
+        Assert.That(await page.Locator("[data-handle]").CountAsync(), Is.Zero);
+        await page.GetByRole(AriaRole.Link, new() { Name = "Edit", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "‹ Players", Exact = true })).ToHaveCountAsync(0);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Play", Exact = true }).ClickAsync();
+        await page.WaitForFunctionAsync("() => navigator.serviceWorker.controller !== null");
+        await page.CloseAsync();
+        await StopServerAsync();
+        using var client = new HttpClient();
+        Assert.ThrowsAsync<HttpRequestException>(async () => await client.GetAsync(_url));
+        IPage reopened = await OpenAsync();
+        await Expect(reopened.GetByRole(AriaRole.Heading, new() { Name = "Play", Exact = true })).ToBeVisibleAsync();
+        await Expect(reopened.Locator("[data-round='1'] [data-game='0']")).ToContainTextAsync(firstRound.Replace("||", string.Empty).Trim(), new() { UseInnerText = true });
+        await reopened.ScreenshotAsync(new() { Path = Path.Combine(_root, $"artifacts/task3-play-{theme}.png"), FullPage = true });
+    }
+
+    /// <summary>Checks WebAssembly performance using a full-sized session.</summary>
+    [TestCase(24, false)]
+    [TestCase(6, true)]
+    public async Task Schedule_LargeSession_GeneratesInBrowserAsync(int count, bool ranked)
+    {
+        IPage page = await OpenAsync("schedule");
+        Player[] players = [.. ScheduleTests.Players(count).Select((player, index) => player with { Rank = ranked ? (index < count / 2 ? 1 : 3) : null })];
+        var session = new SocialTennis.Scheduling.Session(1, SocialTennis.Scheduling.ScheduleStep.Players, [1, 2, 3, 4, 5, 6], players, [], false);
+        await page.EvaluateAsync("json => localStorage.setItem('social-tennis-schedule', json)", SocialTennis.Scheduling.SessionJson.Serialize(session));
+        await page.ReloadAsync();
+        var timer = Stopwatch.StartNew();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Review schedule", Exact = true })).ToBeVisibleAsync(new() { Timeout = 5000 });
+        Assert.That(timer.Elapsed, Is.LessThan(TimeSpan.FromSeconds(5)));
+        Assert.That(await page.Locator("[data-game]").CountAsync(), Is.EqualTo(count == 24 ? 36 : 12));
+    }
+
+    /// <summary>Creates small sessions with no server and checks each leftover type.</summary>
+    [TestCase(4, 3, 0, 0)]
+    [TestCase(5, 5, 0, 1)]
+    [TestCase(6, 6, 1, 0)]
+    [TestCase(7, 6, 1, 0)]
+    public async Task Schedule_SmallSessions_CreatesOfflineAndResumesAsync(int count, int rounds, int extra, int sitting)
+    {
+        IPage page = await OpenAsync("schedule");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create schedule", Exact = true }).ClickAsync();
+        await page.ReloadAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Courts", Exact = true })).ToBeVisibleAsync();
+        await page.GetByLabel("Select courts", new() { Exact = true }).FillAsync("4,5");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await Expect(page.GetByText("No players yet.", new() { Exact = false })).ToBeVisibleAsync();
+        await page.GetByLabel("Add players", new() { Exact = true }).FillAsync("Missing");
+        await Expect(page.GetByText("No matching players.", new() { Exact = true })).ToBeVisibleAsync();
+        Player[] players = ScheduleTests.Players(count);
+        var session = new SocialTennis.Scheduling.Session(1, SocialTennis.Scheduling.ScheduleStep.Players, [4, 5], players, [], false);
+        await page.EvaluateAsync("json => localStorage.setItem('social-tennis-schedule', json)", SocialTennis.Scheduling.SessionJson.Serialize(session));
+        await page.WaitForFunctionAsync("() => navigator.serviceWorker.controller !== null");
+        await page.CloseAsync();
+        await StopServerAsync();
+        using var client = new HttpClient();
+        Assert.ThrowsAsync<HttpRequestException>(async () => await client.GetAsync(_url));
+        IPage reopened = await OpenAsync("schedule");
+        await Expect(reopened.GetByRole(AriaRole.Heading, new() { Name = $"Playing ({count})", Exact = true })).ToBeVisibleAsync();
+        await reopened.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await Expect(reopened.GetByRole(AriaRole.Heading, new() { Name = "Review schedule", Exact = true })).ToBeVisibleAsync();
+        Assert.That(await reopened.Locator("[data-round]").CountAsync(), Is.EqualTo(rounds));
+        Assert.That(await reopened.Locator("[data-game]").CountAsync(), Is.EqualTo(rounds * (1 + extra)));
+        Assert.That(await reopened.GetByText("Sitting out:", new() { Exact = false }).CountAsync(), Is.EqualTo(rounds * sitting));
+        if (rounds < 6)
+        {
+            await Expect(reopened.GetByText($"With {count} players only {rounds} rounds are possible without anyone partnering the same player twice.")).ToBeVisibleAsync();
+        }
+
+        await reopened.ReloadAsync();
+        await Expect(reopened.GetByRole(AriaRole.Heading, new() { Name = "Review schedule", Exact = true })).ToBeVisibleAsync();
+        await reopened.GetByRole(AriaRole.Button, new() { Name = "Play", Exact = true }).ClickAsync();
+        await Expect(reopened.GetByText("Court 4", new() { Exact = true }).First).ToBeVisibleAsync();
+    }
+
+    /// <summary>Checks bounded suggestions, excluded selections and storage failures.</summary>
+    [Test]
+    public async Task Schedule_SearchAndStorageFailures_LeavesSavedSessionIntactAsync()
+    {
+        IPage page = await OpenAsync("schedule");
+        Player[] players = ScheduleTests.Players(10);
+        await page.EvaluateAsync("json => localStorage.setItem('social-tennis-players', json)", SocialTennis.Players.PlayerDataJson.Serialize(new(1, players, SocialTennis.Players.PlayerSort.FirstNameAscending)));
+        await page.ReloadAsync();
+        await page.EvaluateAsync("""
+            () => {
+                const save = Storage.prototype.setItem;
+                Storage.prototype.setItem = function(key, value) {
+                    if (window.failScheduleSave && key === 'social-tennis-schedule') throw new DOMException('Full', 'QuotaExceededError');
+                    return save.call(this, key, value);
+                };
+            }
+            """);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Create schedule", Exact = true }).ClickAsync();
+        await page.GetByLabel("Select courts", new() { Exact = true }).FillAsync("1");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await page.GetByLabel("Add players", new() { Exact = true }).FillAsync("p");
+        Assert.That(await page.Locator(".suggestions button").CountAsync(), Is.EqualTo(8));
+        await page.GetByRole(AriaRole.Button, new() { Name = "Player1 Tennis", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true }).ClickAsync();
+        await page.GetByLabel("Add players", new() { Exact = true }).FillAsync("ten player1");
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "Player1 Tennis", Exact = true })).ToHaveCountAsync(0);
+        await page.GetByLabel("Add players", new() { Exact = true }).FillAsync("player2");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Player2 Tennis", Exact = true }).ClickAsync();
+        await page.EvaluateAsync("() => { window.failScheduleSave = true; }");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Alert)).ToHaveTextAsync("Couldn't save the schedule. Please try again.");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Playing (1)", Exact = true })).ToBeVisibleAsync();
+        await page.ReloadAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Playing (1)", Exact = true })).ToBeVisibleAsync();
+    }
+
+    /// <summary>Changing court capacity invalidates old rounds before the next saved step.</summary>
+    [Test]
+    public async Task Schedule_BackToCourtsWithFewerCourts_ReopensAndRegeneratesAsync()
+    {
+        IPage page = await OpenAsync("schedule");
+        Player[] players = ScheduleTests.Players(8);
+        var session = new SocialTennis.Scheduling.Session(1, SocialTennis.Scheduling.ScheduleStep.Review, [4, 5], players, SocialTennis.Scheduling.ScheduleEngine.Generate(players, 2, 0), false);
+        await page.EvaluateAsync("json => localStorage.setItem('social-tennis-schedule', json)", SocialTennis.Scheduling.SessionJson.Serialize(session));
+        await page.ReloadAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "‹ Players", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Back", Exact = true }).ClickAsync();
+        await page.GetByLabel("Select courts", new() { Exact = true }).FillAsync("4");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await page.ReloadAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Playing (8)", Exact = true })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Next", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Review schedule", Exact = true })).ToBeVisibleAsync();
+        Assert.That(await page.Locator("[data-game]").CountAsync(), Is.EqualTo(6));
+    }
+
+    private static async Task DragScheduleAsync(IPage page, ILocator source, ILocator target)
+    {
+        await source.ScrollIntoViewIfNeededAsync();
+        LocatorBoundingBoxResult start = await source.BoundingBoxAsync() ?? throw new AssertionException("Missing drag handle");
+        await page.Mouse.MoveAsync(start.X + (start.Width / 2), start.Y + (start.Height / 2));
+        await page.Mouse.DownAsync();
+        await target.ScrollIntoViewIfNeededAsync();
+        LocatorBoundingBoxResult end = await target.BoundingBoxAsync() ?? throw new AssertionException("Missing drag target");
+        await page.Mouse.MoveAsync(end.X + (end.Width / 2), end.Y + (end.Height / 2), new() { Steps = 12 });
+        await page.Mouse.UpAsync();
     }
 
     private static async Task AddPlayerAsync(IPage page, string firstName, string lastName)

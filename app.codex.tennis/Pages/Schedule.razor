@@ -1,7 +1,248 @@
 @page "/schedule"
+@inject IScheduleStorage Storage
+@inject IPlayerStorage PlayerStorage
+@inject NavigationManager Navigation
 
 <PageTitle>Social Tennis</PageTitle>
-<header><p class="eyebrow">SOCIAL TENNIS</p><h1>Schedule</h1></header>
-<section class="card">
-    <p>There is no active schedule.</p>
-</section>
+<header><p class="eyebrow">SOCIAL TENNIS</p><h1>@Heading</h1></header>
+@if (_error is not null)
+{
+    <p role="alert">@_error</p>
+}
+@if (!_loaded)
+{
+    <p role="status">Loading…</p>
+}
+else if (_session is null)
+{
+    <section class="card">
+        <p>There is no active schedule.</p>
+        <button disabled="@_busy" @onclick="CreateAsync">Create schedule</button>
+    </section>
+}
+else if (_session.Step == ScheduleStep.Courts)
+{
+    <form class="card" @onsubmit="SaveCourtsAsync" @onsubmit:preventDefault>
+        <label for="courts">Select courts</label>
+        <input id="courts" placeholder="e.g. 4,5,6" @bind="_courts" aria-describedby="court-hint" disabled="@_busy" />
+        <p id="court-hint">Enter the court numbers, separated by commas.</p>
+        <button type="submit" disabled="@_busy">Next</button>
+    </form>
+}
+else if (_session.Step == ScheduleStep.Players)
+{
+    <section class="card">
+        @if (_players.Length == 0)
+        {
+            <p>No players yet. <a href="players">Add players</a> first, then come back.</p>
+        }
+        <label for="add-players">Add players</label>
+        <div class="search-row">
+            <input id="add-players" type="search" placeholder="Type a name" value="@_search" @oninput="Search" disabled="@_busy" autocomplete="off" />
+            <button @onclick="AddAsync" disabled="@(_busy || _selected is null)">Add</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_search))
+        {
+            Player[] suggestions = Suggestions();
+            @if (suggestions.Length == 0)
+            {
+                <p>No matching players.</p>
+            }
+            <ul class="suggestions">
+                @foreach (Player player in suggestions)
+                {
+                    <li><button disabled="@_busy" aria-pressed="@(_selected?.Id == player.Id)" @onclick="() => _selected = player">@player.FullName</button></li>
+                }
+            </ul>
+        }
+        <h2>Playing (@_session.Players.Length)</h2>
+        @if (_session.Players.Length == 0)
+        {
+            <p>Nobody added yet.</p>
+        }
+        <ul class="playing">
+            @foreach (Player player in _session.Players)
+            {
+                <li><span>@player.FullName</span><button disabled="@_busy" aria-label="@($"Remove {player.FullName}")" @onclick="() => RemoveAsync(player.Id)">Remove</button></li>
+            }
+        </ul>
+        @if (_session.Players.Length < 4)
+        {
+            <p>Add at least 4 players.</p>
+        }
+        @if (_busy)
+        {
+            <p role="status">Matching players…</p>
+        }
+        <div class="actions">
+            <button disabled="@_busy" @onclick="BackAsync">Back</button>
+            <button disabled="@(_busy || _session.Players.Length < 4)" @onclick="GenerateAsync">Next</button>
+        </div>
+    </section>
+}
+else
+{
+    @if (!_session.InPlay)
+    {
+        <button class="back-link" disabled="@_busy" @onclick="ReturnToPlayersAsync">‹ Players</button>
+    }
+    @if (_session.Rounds.Length < 6)
+    {
+        <p>With @_session.Players.Length players only @_session.Rounds.Length rounds are possible without anyone partnering the same player twice.</p>
+    }
+    <ScheduleCards Session="_session" Review="true" OnReorder="SaveAsync" />
+    <div class="actions">
+        <button disabled title="Player editing is available in the next increment.">Edit</button>
+        <button disabled="@_busy" @onclick="PlayAsync">Play</button>
+    </div>
+}
+
+@code {
+    private Session? _session;
+    private Player[] _players = [];
+    private bool _loaded;
+    private bool _busy;
+    private string _courts = string.Empty;
+    private string _search = string.Empty;
+    private Player? _selected;
+    private string? _error;
+
+    private string Heading => _session?.Step switch
+    {
+        ScheduleStep.Courts => "Courts",
+        ScheduleStep.Players => "Players",
+        ScheduleStep.Review => "Review schedule",
+        _ => "Schedule",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _session = await Storage.LoadAsync();
+            _players = (await PlayerStorage.LoadAsync()).Players;
+            _courts = string.Join(',', _session?.Courts ?? []);
+            _loaded = true;
+        }
+        catch (Exception exception) when (exception is JSException or System.Text.Json.JsonException)
+        {
+            _error = "Couldn't load the schedule or players. Your saved data has not been changed. Reload to try again.";
+        }
+    }
+
+    private async Task<bool> PersistAsync(Session session)
+    {
+        try
+        {
+            await Storage.SaveAsync(session);
+            _session = session;
+            _error = null;
+            return true;
+        }
+        catch (JSException)
+        {
+            _error = "Couldn't save the schedule. Please try again.";
+            return false;
+        }
+    }
+
+    private async Task SaveAsync(Session session)
+    {
+        await PersistAsync(session);
+    }
+
+    private async Task CreateAsync()
+    {
+        await PersistAsync(Session.Empty);
+    }
+
+    private async Task SaveCourtsAsync()
+    {
+        CourtSelection result = CourtRules.Parse(_courts);
+        _error = result.Error;
+        if (result.Error is null && _session is not null)
+        {
+            await PersistAsync(_session with { Courts = result.Courts, Step = ScheduleStep.Players, Rounds = [] });
+        }
+    }
+
+    private void Search(ChangeEventArgs args)
+    {
+        _search = args.Value?.ToString() ?? string.Empty;
+        _selected = null;
+    }
+
+    private Player[] Suggestions()
+    {
+        return [.. PlayerRules.Find(_players.Where(player => _session?.Players.All(added => added.Id != player.Id) == true),
+            _search, PlayerSort.FirstNameAscending).Take(8)];
+    }
+
+    private async Task AddAsync()
+    {
+        if (_session is not null && _selected is not null && !_session.Players.Any(player => player.Id == _selected.Id))
+        {
+            if (await PersistAsync(_session with { Players = [.. _session.Players, _selected], Rounds = [] }))
+            {
+                _search = string.Empty;
+                _selected = null;
+            }
+        }
+    }
+
+    private async Task RemoveAsync(Guid id)
+    {
+        if (_session is not null)
+        {
+            await PersistAsync(_session with { Players = [.. _session.Players.Where(player => player.Id != id)], Rounds = [] });
+        }
+    }
+
+    private async Task BackAsync()
+    {
+        if (_session is not null)
+        {
+            await PersistAsync(_session with { Step = ScheduleStep.Courts });
+        }
+    }
+
+    private async Task ReturnToPlayersAsync()
+    {
+        if (_session is { InPlay: false })
+        {
+            await PersistAsync(_session with { Step = ScheduleStep.Players });
+        }
+    }
+
+    private async Task GenerateAsync()
+    {
+        if (_session is null || _session.Players.Length < 4 || _busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        await Task.Delay(1); // Yield a paint so the progress message appears before WebAssembly computation.
+        try
+        {
+            Round[] rounds = ScheduleEngine.Generate(_session.Players, _session.Courts.Length, Random.Shared.Next());
+            await PersistAsync(_session with { Rounds = rounds, Step = ScheduleStep.Review });
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PlayAsync()
+    {
+        if (_session is not null && await PersistAsync(_session with { InPlay = true }))
+        {
+            Navigation.NavigateTo("play");
+        }
+    }
+}
