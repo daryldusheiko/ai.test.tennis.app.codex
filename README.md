@@ -1,2 +1,2 @@
-# ai.test.tennis.app.codex
+# app.codex.tennis
 Testing Codex app development
