@@ -5,4 +5,5 @@ using SocialTennis;
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
+builder.Services.AddScoped<SocialTennis.Players.IPlayerStorage, SocialTennis.Players.BrowserPlayerStorage>();
 await builder.Build().RunAsync();

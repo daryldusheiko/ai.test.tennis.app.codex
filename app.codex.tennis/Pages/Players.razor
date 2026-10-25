@@ -1,7 +1,84 @@
 @page "/players"
+@inject IPlayerStorage Storage
 
 <PageTitle>Social Tennis</PageTitle>
 <header><p class="eyebrow">SOCIAL TENNIS</p><h1>Players</h1></header>
-<section class="card">
-    <p>No players yet. Add your first player.</p>
-</section>
+@if (_error is not null)
+{
+    <p role="alert">@_error</p>
+}
+@if (_data is null)
+{
+    <p role="status">@(_error is null ? "Loading…" : "Your saved players have not been changed. Reload to try again.")</p>
+}
+else
+{
+    <section class="card">
+        <a class="button-link" href="players/add">Add player</a>
+        <label for="player-search">Search players</label>
+        <input id="player-search" type="search" placeholder="Search players" @bind="_search" @bind:event="oninput" />
+        <label for="player-sort">Sort players</label>
+        <select id="player-sort" value="@_data.Sort" @onchange="ChangeSortAsync">
+            <option value="FirstNameAscending">First name (A–Z)</option>
+            <option value="FirstNameDescending">First name (Z–A)</option>
+            <option value="LastNameAscending">Last name (A–Z)</option>
+            <option value="LastNameDescending">Last name (Z–A)</option>
+        </select>
+    </section>
+    @if (_data.Players.Length == 0)
+    {
+        <p>No players yet. Add your first player.</p>
+    }
+    else
+    {
+        var matches = PlayerRules.Find(_data.Players, _search, _data.Sort).ToArray();
+        @if (matches.Length == 0)
+        {
+            <p>No players match “@_search”.</p>
+        }
+        <ul class="player-list">
+            @foreach (Player player in matches)
+            {
+                <li @key="player.Id"><span>@player.FullName</span><a class="button-link" href="@($"players/{player.Id}")" aria-label="@($"Edit {player.FullName}")">Edit</a></li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    private PlayerData? _data;
+    private string _search = string.Empty;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Storage.LoadAsync();
+        }
+        catch (Exception exception) when (exception is JSException or System.Text.Json.JsonException)
+        {
+            _error = "Couldn't load players. Please try again.";
+        }
+    }
+
+    private async Task ChangeSortAsync(ChangeEventArgs args)
+    {
+        if (_data is null || !Enum.TryParse(args.Value?.ToString(), out PlayerSort sort))
+        {
+            return;
+        }
+
+        try
+        {
+            PlayerData updated = _data with { Sort = sort };
+            await Storage.SaveAsync(updated);
+            _data = updated;
+            _error = null;
+        }
+        catch (JSException)
+        {
+            _error = "Couldn't save the sort order. Please try again.";
+        }
+    }
+}

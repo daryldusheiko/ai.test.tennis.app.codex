@@ -1,1 +1,5 @@
-header { margin-bottom: 2rem; }
+header { margin-bottom: 1.5rem; }
+.player-list { list-style: none; padding: 0; }
+.player-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; margin-bottom: .65rem; border: 1px solid var(--border); border-radius: .75rem; background: var(--surface); }
+.player-list span { min-width: 0; }
+.player-list a { flex-shrink: 0; }

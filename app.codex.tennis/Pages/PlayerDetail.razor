@@ -1,0 +1,152 @@
+@page "/players/add"
+@page "/players/{Id:guid}"
+@inject IPlayerStorage Storage
+@inject NavigationManager Navigation
+@inject IJSRuntime JavaScript
+
+<PageTitle>Social Tennis</PageTitle>
+<a href="players">‹ Players</a>
+<header><h1>@(Id is null ? "Add player" : "Edit player")</h1></header>
+@if (_error is not null)
+{
+    <p role="alert">@_error</p>
+}
+@if (_loading)
+{
+    <p role="status">Loading…</p>
+}
+else if (_data is not null && (Id is null || _player is not null))
+{
+    <form class="card" @onsubmit="SaveAsync" @onsubmit:preventDefault>
+        @if (_errors.Count > 0)
+        {
+            <ul role="alert" class="validation-errors">
+                @foreach (string error in _errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        }
+        <label for="first-name">First name</label>
+        <input id="first-name" autocomplete="given-name" aria-required="true" @bind="_firstName" />
+        <label for="last-name">Last name</label>
+        <input id="last-name" autocomplete="family-name" @bind="_lastName" />
+        <label for="rank">Rank</label>
+        <select id="rank" @bind="_rank">
+            <option value="">None</option>
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+        </select>
+        <label for="comment">Comment</label>
+        <textarea id="comment" rows="4" @bind="_comment"></textarea>
+        <div class="actions">
+            <button type="submit" disabled="@_saving">Save</button>
+            @if (_player is not null)
+            {
+                <button type="button" @onclick="ShowDeleteAsync" disabled="@_saving">Delete player</button>
+            }
+        </div>
+    </form>
+    <dialog @ref="_dialog" aria-labelledby="delete-title" aria-describedby="delete-message">
+        <div class="dialog-content">
+            <h2 id="delete-title">Delete player?</h2>
+            <p id="delete-message">@_player?.FullName will be removed. This can't be undone.</p>
+            <div class="actions">
+                <button type="button" @onclick="CancelDeleteAsync" autofocus>Cancel</button>
+                <button type="button" @onclick="DeleteAsync" disabled="@_saving">Delete</button>
+            </div>
+        </div>
+    </dialog>
+}
+else if (_data is not null)
+{
+    <p>This player no longer exists.</p>
+}
+
+@code {
+    [Parameter]
+    public Guid? Id { get; set; }
+
+    private PlayerData? _data;
+    private Player? _player;
+    private string _firstName = string.Empty;
+    private string _lastName = string.Empty;
+    private int? _rank;
+    private string _comment = string.Empty;
+    private IReadOnlyList<string> _errors = [];
+    private string? _error;
+    private bool _loading = true;
+    private bool _saving;
+    private ElementReference _dialog;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _error = null;
+        _errors = [];
+        try
+        {
+            _data = await Storage.LoadAsync();
+            _player = _data.Players.FirstOrDefault(p => p.Id == Id);
+            _firstName = _player?.FirstName ?? string.Empty;
+            _lastName = _player?.LastName ?? string.Empty;
+            _rank = _player?.Rank;
+            _comment = _player?.Comment ?? string.Empty;
+        }
+        catch (Exception exception) when (exception is JSException or System.Text.Json.JsonException)
+        {
+            _error = "Couldn't load players. Please try again.";
+        }
+
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _errors = PlayerRules.Validate(_firstName, _lastName, _rank, _comment);
+        if (_errors.Count > 0 || _data is null || _saving)
+        {
+            return;
+        }
+
+        var player = new Player(Id ?? Guid.NewGuid(), _firstName.Trim(), _lastName.Trim(), _rank, _comment);
+        Player[] players = Id is null ? [.. _data.Players, player] : [.. _data.Players.Select(p => p.Id == Id ? player : p)];
+        await PersistAsync(_data with { Players = players });
+    }
+
+    private async Task ShowDeleteAsync()
+    {
+        await JavaScript.InvokeVoidAsync("tennisDialogs.show", _dialog);
+    }
+
+    private async Task CancelDeleteAsync()
+    {
+        await JavaScript.InvokeVoidAsync("tennisDialogs.close", _dialog);
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_data is not null && !_saving)
+        {
+            await CancelDeleteAsync();
+            await PersistAsync(_data with { Players = [.. _data.Players.Where(p => p.Id != Id)] });
+        }
+    }
+
+    private async Task PersistAsync(PlayerData data)
+    {
+        _saving = true;
+        try
+        {
+            await Storage.SaveAsync(data);
+            Navigation.NavigateTo("players");
+        }
+        catch (JSException)
+        {
+            _error = "Couldn't save players. Please try again.";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

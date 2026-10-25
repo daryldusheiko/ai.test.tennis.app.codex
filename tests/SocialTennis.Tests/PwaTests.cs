@@ -14,6 +14,7 @@ namespace SocialTennis.Tests;
 [TestFixture]
 public sealed class PwaTests
 {
+    private static readonly string[] RemainingPlayers = ["Bob Jones"];
     private readonly string _root = FindRoot();
     private IPlaywright? _playwright;
     private IBrowser? _browser;
@@ -211,7 +212,8 @@ public sealed class PwaTests
     {
         IPage page = await OpenAsync("about");
         await page.GetByLabel("Theme", new() { Exact = true }).SelectOptionAsync("Dark");
-        await page.EvaluateAsync("localStorage.setItem('future-player-data', 'keep me')");
+        await page.GetByRole(AriaRole.Link, new() { Name = "Players", Exact = true }).ClickAsync();
+        await AddPlayerAsync(page, "Upgrade", "Player");
         await page.WaitForFunctionAsync("() => navigator.serviceWorker.controller !== null");
         string previousCache = await page.EvaluateAsync<string>("async () => (await caches.keys()).find(key => key.startsWith('social-tennis-'))");
         await StopServerAsync();
@@ -237,7 +239,9 @@ public sealed class PwaTests
         await Expect(reopened.GetByText("Version 1.0.43 (def5678)")).ToBeVisibleAsync(new() { Timeout = 30000 });
         await reopened.WaitForFunctionAsync("async oldCache => !(await caches.keys()).includes(oldCache)", previousCache);
         await Expect(reopened.GetByLabel("Theme", new() { Exact = true })).ToHaveValueAsync("Dark");
-        Assert.That(await reopened.EvaluateAsync<string>("localStorage.getItem('future-player-data')"), Is.EqualTo("keep me"));
+        await reopened.GetByRole(AriaRole.Link, new() { Name = "Players", Exact = true }).ClickAsync();
+        await Expect(reopened.GetByRole(AriaRole.Link, new() { Name = "Edit Upgrade Player", Exact = true })).ToBeVisibleAsync();
+        await reopened.GetByRole(AriaRole.Link, new() { Name = "About", Exact = true }).ClickAsync();
         await StopServerAsync();
         await reopened.ReloadAsync();
         await Expect(reopened.GetByText("Version 1.0.43 (def5678)")).ToBeVisibleAsync();
@@ -255,6 +259,168 @@ public sealed class PwaTests
         await Expect(page.Locator("html")).ToHaveAttributeAsync("data-theme", "Dark");
         await page.GetByLabel("Theme", new() { Exact = true }).SelectOptionAsync("Light");
         await Expect(page.Locator("html")).ToHaveAttributeAsync("data-theme", "Light");
+    }
+
+    /// <summary>Verifies adding, validation, searching, sorting, editing and deletion.</summary>
+    [Test]
+    public async Task Players_MainJourney_ValidatesEditsSearchesSortsAndDeletesAsync()
+    {
+        IPage page = await OpenAsync("players");
+        await Expect(page.GetByText("No players yet. Add your first player.")).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Link, new() { Name = "Add player", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await Expect(page.GetByText("First name is required.")).ToBeVisibleAsync();
+        await page.GetByLabel("First name", new() { Exact = true }).FillAsync(new string('a', 51));
+        await page.GetByLabel("Last name", new() { Exact = true }).FillAsync(new string('b', 51));
+        await page.GetByLabel("Comment", new() { Exact = true }).FillAsync(new string('c', 501));
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await Expect(page.GetByText("First name must be 50 characters or fewer.")).ToBeVisibleAsync();
+        await Expect(page.GetByText("Last name must be 50 characters or fewer.")).ToBeVisibleAsync();
+        await Expect(page.GetByText("Comment must be 500 characters or fewer.")).ToBeVisibleAsync();
+        await page.GetByLabel("First name", new() { Exact = true }).FillAsync("Ann");
+        await page.GetByLabel("Last name", new() { Exact = true }).FillAsync("Smith");
+        await page.GetByLabel("Rank", new() { Exact = true }).SelectOptionAsync("2");
+        await page.GetByLabel("Comment", new() { Exact = true }).FillAsync("Left handed\nPrefers doubles");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await AddPlayerAsync(page, "Bob", "Jones");
+        await page.GetByLabel("Search players", new() { Exact = true }).FillAsync("ANN sm");
+        await Expect(page.GetByRole(AriaRole.Link, new() { Name = "Edit Ann Smith", Exact = true })).ToBeVisibleAsync();
+        await Expect(page.GetByRole(AriaRole.Link, new() { Name = "Edit Bob Jones", Exact = true })).ToHaveCountAsync(0);
+        await page.GetByLabel("Search players", new() { Exact = true }).FillAsync("nobody");
+        await Expect(page.GetByText("No players match “nobody”.")).ToBeVisibleAsync();
+        await page.GetByLabel("Search players", new() { Exact = true }).FillAsync(string.Empty);
+        foreach ((string option, string[] names) in new[]
+        {
+            ("FirstNameAscending", new[] { "Ann Smith", "Bob Jones" }),
+            ("FirstNameDescending", ["Bob Jones", "Ann Smith"]),
+            ("LastNameAscending", ["Bob Jones", "Ann Smith"]),
+            ("LastNameDescending", ["Ann Smith", "Bob Jones"]),
+        })
+        {
+            await page.GetByLabel("Sort players", new() { Exact = true }).SelectOptionAsync(option);
+            await Expect(page.Locator(".player-list li span")).ToHaveTextAsync(names);
+        }
+
+        await page.GetByRole(AriaRole.Link, new() { Name = "Edit Ann Smith", Exact = true }).ClickAsync();
+        await Expect(page.GetByLabel("Rank", new() { Exact = true })).ToHaveValueAsync("2");
+        await Expect(page.GetByLabel("Comment", new() { Exact = true })).ToHaveValueAsync("Left handed\nPrefers doubles");
+        await page.GetByLabel("First name", new() { Exact = true }).FillAsync("Anna");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Link, new() { Name = "Edit Anna Smith", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Delete player", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Dialog)).ToBeVisibleAsync();
+        await Expect(page.GetByText("Anna Smith will be removed. This can't be undone.")).ToBeVisibleAsync();
+        await AssertDeleteDialogFitsAsync(page);
+        await page.ScreenshotAsync(new() { Path = Path.Combine(_root, "artifacts/task2-delete-iphone-se.png") });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Dialog)).Not.ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Delete player", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Players", Exact = true })).ToBeVisibleAsync();
+        await Expect(page.GetByRole(AriaRole.Link, new() { Name = "Edit Anna Smith", Exact = true })).ToHaveCountAsync(0);
+        await page.ReloadAsync();
+        await Expect(page.Locator(".player-list li span")).ToHaveTextAsync(RemainingPlayers);
+        await page.GotoAsync(_url + "players/00000000-0000-0000-0000-000000000001");
+        await Expect(page.GetByText("This player no longer exists.")).ToBeVisibleAsync();
+    }
+
+    /// <summary>Verifies player persistence and all CRUD operations while the server is unreachable.</summary>
+    [Test]
+    public async Task Players_OfflineReopen_PreservesPlayersSortAndEditsAsync()
+    {
+        IPage page = await OpenAsync("players");
+        await AddPlayerAsync(page, "Ann", "Smith");
+        await AddPlayerAsync(page, "Bob", "Jones");
+        await page.GetByLabel("Sort players", new() { Exact = true }).SelectOptionAsync("FirstNameDescending");
+        await page.WaitForFunctionAsync("() => JSON.parse(localStorage.getItem('social-tennis-players')).sort === 1");
+        await page.WaitForFunctionAsync("() => navigator.serviceWorker.controller !== null");
+        await page.CloseAsync();
+        await StopServerAsync();
+        using var client = new HttpClient();
+        Assert.ThrowsAsync<HttpRequestException>(async () => await client.GetAsync(_url));
+        IPage reopened = await OpenAsync("players");
+        await Expect(reopened.GetByLabel("Sort players", new() { Exact = true })).ToHaveValueAsync("FirstNameDescending");
+        await Expect(reopened.Locator(".player-list li span")).ToHaveTextAsync(["Bob Jones", "Ann Smith"]);
+        await AddPlayerAsync(reopened, "Cara", string.Empty);
+        await reopened.GetByRole(AriaRole.Link, new() { Name = "Edit Ann Smith", Exact = true }).ClickAsync();
+        await reopened.GetByLabel("Comment", new() { Exact = true }).FillAsync("Saved offline");
+        await reopened.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await reopened.ReloadAsync();
+        await reopened.GetByRole(AriaRole.Link, new() { Name = "Edit Ann Smith", Exact = true }).ClickAsync();
+        await Expect(reopened.GetByLabel("Comment", new() { Exact = true })).ToHaveValueAsync("Saved offline");
+        await reopened.GetByRole(AriaRole.Button, new() { Name = "Delete player", Exact = true }).ClickAsync();
+        await reopened.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true }).ClickAsync();
+        await reopened.ReloadAsync();
+        await Expect(reopened.Locator(".player-list li span")).ToHaveTextAsync(["Cara", "Bob Jones"]);
+        await reopened.ScreenshotAsync(new() { Path = Path.Combine(_root, "artifacts/task2-players-iphone-se.png"), FullPage = true });
+    }
+
+    /// <summary>Verifies theme, long names, legacy ranks and centered dialogs at either page scroll position.</summary>
+    [TestCase("Light")]
+    [TestCase("Dark")]
+    public async Task Players_LongNamesAndLegacyRank_DialogFitsInBothThemesAsync(string theme)
+    {
+        IPage page = await OpenAsync("about");
+        await page.GetByLabel("Theme", new() { Exact = true }).SelectOptionAsync(theme);
+        await page.GetByRole(AriaRole.Link, new() { Name = "Players", Exact = true }).ClickAsync();
+        await Expect(page.GetByLabel("Search players", new() { Exact = true })).ToBeVisibleAsync();
+        Assert.That(await page.GetByLabel("Sort players", new() { Exact = true }).EvaluateAsync<double>("element => element.getBoundingClientRect().height"), Is.GreaterThanOrEqualTo(44));
+        Assert.That(await page.GetByLabel("Search players", new() { Exact = true }).EvaluateAsync<string>("element => getComputedStyle(element, '::placeholder').color"), Is.EqualTo(theme == "Dark" ? "rgb(180, 200, 186)" : "rgb(82, 100, 92)"));
+        await page.EvaluateAsync("""
+            () => localStorage.setItem('social-tennis-players', JSON.stringify({version:1, sort:0, players:[{
+                id:'00000000-0000-0000-0000-000000000001',firstName:'A'.repeat(50),lastName:'B'.repeat(50),rank:9,comment:'Notes'
+            }]}))
+            """);
+        await page.GotoAsync(_url + "players/00000000-0000-0000-0000-000000000001");
+        await Expect(page.GetByLabel("Rank", new() { Exact = true })).ToHaveValueAsync("3");
+        foreach (int position in new[] { 0, 9999 })
+        {
+            await page.GetByRole(AriaRole.Button, new() { Name = "Delete player", Exact = true }).ClickAsync();
+            await page.EvaluateAsync("position => scrollTo(0, position)", position);
+            await AssertDeleteDialogFitsAsync(page);
+            Assert.That(await page.EvaluateAsync<bool>("document.documentElement.scrollWidth <= innerWidth"), Is.True);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+        }
+
+        await page.ScreenshotAsync(new() { Path = Path.Combine(_root, $"artifacts/task2-edit-{theme}.png"), FullPage = true });
+    }
+
+    /// <summary>Verifies storage failures do not falsely report a successful save.</summary>
+    [Test]
+    public async Task Players_StorageFailures_PreservesFormAndReportsErrorsAsync()
+    {
+        IPage page = await OpenAsync("players");
+        await page.GetByRole(AriaRole.Link, new() { Name = "Add player", Exact = true }).ClickAsync();
+        await page.GetByLabel("First name", new() { Exact = true }).FillAsync("Ann");
+        await page.EvaluateAsync("() => { window.testSetItem = Storage.prototype.setItem; Storage.prototype.setItem = () => { throw new DOMException('Full', 'QuotaExceededError'); }; }");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await Expect(page.GetByText("Couldn't save players. Please try again.")).ToBeVisibleAsync();
+        await Expect(page.GetByLabel("First name", new() { Exact = true })).ToHaveValueAsync("Ann");
+        await page.EvaluateAsync("() => { window.testSetItem.call(localStorage, 'social-tennis-players', '{broken'); }");
+        await page.GetByRole(AriaRole.Link, new() { Name = "‹ Players", Exact = true }).ClickAsync();
+        await Expect(page.GetByText("Couldn't load players. Please try again.")).ToBeVisibleAsync();
+        await Expect(page.GetByRole(AriaRole.Link, new() { Name = "Add player", Exact = true })).ToHaveCountAsync(0);
+    }
+
+    private static async Task AddPlayerAsync(IPage page, string firstName, string lastName)
+    {
+        await page.GetByRole(AriaRole.Link, new() { Name = "Add player", Exact = true }).ClickAsync();
+        await page.GetByLabel("First name", new() { Exact = true }).FillAsync(firstName);
+        await page.GetByLabel("Last name", new() { Exact = true }).FillAsync(lastName);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Players", Exact = true })).ToBeVisibleAsync();
+    }
+
+    private static async Task AssertDeleteDialogFitsAsync(IPage page)
+    {
+        ILocator dialog = page.GetByRole(AriaRole.Dialog);
+        LocatorBoundingBoxResult bounds = await dialog.BoundingBoxAsync() ?? throw new InvalidOperationException("Dialog missing.");
+        LocatorBoundingBoxResult toolbar = await page.GetByRole(AriaRole.Navigation).BoundingBoxAsync() ?? throw new InvalidOperationException("Toolbar missing.");
+        Assert.That(bounds.Y, Is.GreaterThanOrEqualTo(0));
+        Assert.That(bounds.Y + bounds.Height, Is.LessThanOrEqualTo(toolbar.Y));
+        Assert.That(Math.Abs((bounds.Y + (bounds.Height / 2)) - 333.5), Is.LessThan(2));
+        await Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true })).ToBeInViewportAsync();
+        await Expect(dialog.GetByRole(AriaRole.Button, new() { Name = "Delete", Exact = true })).ToBeInViewportAsync();
     }
 
     private static string FindRoot()

@@ -10,7 +10,7 @@ p { margin: .65rem 0; }
 a { color: var(--accent); }
 label { display: block; font-weight: 600; margin-top: 1.5rem; }
 select, button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: .5rem; min-height: 44px; padding: .5rem .75rem; }
-select { width: 100%; margin-top: .4rem; }
+select { width: 100%; height: 2.9rem; margin-top: .4rem; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 h1:focus { outline: none; }
 .skip-link { position: fixed; top: -10rem; left: 1rem; z-index: 20; background: var(--surface); padding: .75rem; }
@@ -18,3 +18,15 @@ h1:focus { outline: none; }
 .loading { min-height: 100svh; display: grid; place-items: center; }
 #blazor-error-ui { display: none; position: fixed; top: 0; left: 0; right: 0; padding: 1rem; background: var(--surface); z-index: 30; }
 ol { padding-left: 1.25rem; }
+input, textarea { display: block; width: 100%; min-width: 0; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: .5rem; padding: .6rem; margin-top: .4rem; }
+textarea { resize: vertical; }
+.button-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: .5rem; text-decoration: none; }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
+button { cursor: pointer; }
+button:disabled { opacity: .6; cursor: default; }
+.validation-errors { color: #ab2020; padding-left: 1.2rem; }
+:root[data-theme="Dark"] .validation-errors { color: #ffaaa4; }
+dialog { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 1rem; padding: 0; width: min(28rem, calc(100% - 2rem)); max-height: calc(100dvh - 12rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); margin: auto; overflow-y: auto; }
+dialog::backdrop { background: #0009; }
+.dialog-content { padding: 1.25rem; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
