@@ -1,1 +1,7 @@
-header { margin-bottom: 2rem; }
+.search-row { display: flex; align-items: end; gap: .5rem; }
+.search-row input { flex: 1; }
+.suggestions, .playing { list-style: none; padding: 0; }
+.suggestions button { width: 100%; text-align: left; margin-top: .3rem; }
+.suggestions button[aria-pressed="true"] { outline: 2px solid var(--accent); background: var(--highlight); }
+.playing li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .6rem 0; border-bottom: 1px solid var(--border); }
+.back-link { margin: 1rem 0; }

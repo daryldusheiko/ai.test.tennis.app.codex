@@ -1,8 +1,44 @@
 @page "/play"
+@inject IScheduleStorage Storage
 
 <PageTitle>Social Tennis</PageTitle>
 <header><p class="eyebrow">SOCIAL TENNIS</p><h1>Play</h1></header>
-<section class="card">
-    <h2>No schedule in play.</h2>
-    <p>Create one on the Schedule page.</p>
-</section>
+@if (_error is not null)
+{
+    <p role="alert">@_error</p>
+}
+else if (!_loaded)
+{
+    <p role="status">Loading…</p>
+}
+else if (_session is { InPlay: true })
+{
+    <ScheduleCards Session="_session" />
+    <a class="button-link" href="schedule">Edit</a>
+}
+else
+{
+    <section class="card">
+        <h2>No schedule in play.</h2>
+        <p>@(_session is null ? "Create one on the Schedule page." : "Finish setting it up on the Schedule page, then tap Play.")</p>
+    </section>
+}
+
+@code {
+    private Session? _session;
+    private bool _loaded;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _session = await Storage.LoadAsync();
+            _loaded = true;
+        }
+        catch (Exception exception) when (exception is JSException or System.Text.Json.JsonException)
+        {
+            _error = "Couldn't load the schedule. Your saved data has not been changed. Reload to try again.";
+        }
+    }
+}

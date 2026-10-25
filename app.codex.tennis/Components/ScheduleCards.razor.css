@@ -1,0 +1,18 @@
+.round-card { padding: .85rem; }
+.round-header { display: flex; align-items: center; justify-content: space-between; }
+.round-header h2 { margin: .25rem 0 .75rem; }
+.game { display: flex; align-items: center; gap: .35rem; border-top: 1px solid var(--border); padding: .75rem 0; }
+.match { display: grid; grid-template-columns: minmax(0, 1fr) 1rem minmax(0, 1fr); flex: 1; align-items: center; gap: .25rem; min-width: 0; }
+.side { display: flex; flex-direction: column; align-items: flex-start; justify-self: center; max-width: 100%; }
+.versus { text-align: center; color: var(--muted); }
+.court { font-size: .8rem; font-weight: 700; width: 2.6rem; flex-shrink: 0; }
+.drag-handle { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; flex-shrink: 0; min-width: 36px; padding: .4rem; cursor: grab; }
+.sitting-out { font-size: .9rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: .75rem; }
+.rank-conflict { color: var(--danger); }
+.rank { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; margin-right: .25rem; background: #777; }
+.rank-1 { background: #238345; }
+.rank-2 { background: #d4a400; }
+.rank-3 { background: #d33b35; }
+
+.dragging { opacity: .55; }
+.drop-target { outline: 2px solid var(--accent); outline-offset: 2px; }
