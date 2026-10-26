@@ -2,6 +2,7 @@
 @inject IScheduleStorage Storage
 @inject IPlayerStorage PlayerStorage
 @inject NavigationManager Navigation
+@inject IJSRuntime JavaScript
 
 <PageTitle>Social Tennis</PageTitle>
 <header><p class="eyebrow">SOCIAL TENNIS</p><h1>@Heading</h1></header>
@@ -82,7 +83,7 @@ else if (_session.Step == ScheduleStep.Players)
 }
 else
 {
-    @if (!_session.InPlay)
+    @if (!_session.InPlay && !_session.Editing)
     {
         <button class="back-link" disabled="@_busy" @onclick="ReturnToPlayersAsync">‹ Players</button>
     }
@@ -90,14 +91,78 @@ else
     {
         <p>With @_session.Players.Length players only @_session.Rounds.Length rounds are possible without anyone partnering the same player twice.</p>
     }
-    <ScheduleCards Session="_session" Review="true" OnReorder="SaveAsync" />
+    @if (_session.Editing)
+    {
+        <section class="card" role="status">
+            <p>Press and hold a name to pin or swap a player.</p>
+            @if (_swap is not null)
+            {
+                <p>Tap a player in round @(_swap.Round + 1) to swap with @ScheduleEditing.Name(_session, _swap.Player).</p>
+                <button @onclick="() => _swap = null">Cancel</button>
+            }
+            @if (_message is not null) { <p>@_message</p> }
+        </section>
+    }
+    <ScheduleCards Session="_session" Review="true" OnReorder="SaveAsync" OnHold="HoldAsync" OnTap="TapAsync" />
     <div class="actions">
-        <button disabled title="Player editing is available in the next increment.">Edit</button>
+        <button disabled="@_busy" @onclick="ToggleEditAsync">@(_session.Editing ? "Done" : "Edit")</button>
+        @if (_session.Editing)
+        {
+            <button disabled="@_busy" @onclick="RescheduleAsync">@(_busy ? "Re-scheduling…" : "Re-schedule")</button>
+        }
         <button disabled="@_busy" @onclick="PlayAsync">Play</button>
     </div>
 }
 
+@if (_session is not null)
+{
+    <dialog @ref="_optionsDialog" aria-labelledby="player-options-title">
+        <div class="dialog-content">
+            <h2 id="player-options-title">@(_held is null ? "Player" : ScheduleEditing.Name(_session, _held.Player))</h2>
+            <p>@OptionsMessage</p>
+            @if (_error is not null) { <p role="alert">@_error</p> }
+            <div class="actions">
+                @if (_held is not null && !ScheduleEditing.Locked(_session, _held))
+                {
+                    @if (ScheduleEditing.GameAt(_session, _held) is not null)
+                    {
+                        <button @onclick="PinAsync">@(_session.Rounds[_held.Round].Pinned.Contains(_held.Player) ? "Unpin" : "Pin")</button>
+                    }
+                    @if (!_session.Rounds[_held.Round].Pinned.Contains(_held.Player))
+                    {
+                        <button @onclick="BeginSwapAsync">Swap</button>
+                    }
+                }
+                <button @onclick="CloseOptionsAsync">@(_held is not null && ScheduleEditing.Locked(_session, _held) ? "Close" : "Cancel")</button>
+            </div>
+        </div>
+    </dialog>
+    <dialog @ref="_conflictDialog" aria-labelledby="conflict-title">
+        <div class="dialog-content">
+            <h2 id="conflict-title">Already played together</h2>
+            @if (_conflict is not null)
+            {
+                <p>@ScheduleEditing.Name(_session, _conflict.First) and @ScheduleEditing.Name(_session, _conflict.Second) were partners in round @(_conflict.CompletedRound + 1), which is complete, and are partners again in round @(_conflict.Round + 1). Who should move?</p>
+                <div class="actions">
+                    <button @onclick="() => ResolveAsync(_conflict.First)">Move @ScheduleEditing.Name(_session, _conflict.First)</button>
+                    <button @onclick="() => ResolveAsync(_conflict.Second)">Move @ScheduleEditing.Name(_session, _conflict.Second)</button>
+                    <button @onclick="AcceptAsync">Keep them together</button>
+                    <button @onclick="CloseConflictAsync">Cancel</button>
+                </div>
+            }
+        </div>
+    </dialog>
+}
+
 @code {
+    private ElementReference _optionsDialog;
+    private ElementReference _conflictDialog;
+    private PlayerPosition? _held;
+    private PlayerPosition? _swap;
+    private PartnerConflict? _conflict;
+    private readonly List<PartnerConflict> _choices = [];
+    private readonly List<PlayerPosition> _moves = [];
+    private string? _message;
     private Session? _session;
     private Player[] _players = [];
     private bool _loaded;
@@ -210,6 +275,9 @@ else
     {
         if (_session is { InPlay: false })
         {
+            _held = null;
+            _swap = null;
+            _conflict = null;
             await PersistAsync(_session with { Step = ScheduleStep.Players });
         }
     }
@@ -240,9 +308,182 @@ else
 
     private async Task PlayAsync()
     {
-        if (_session is not null && await PersistAsync(_session with { InPlay = true }))
+        if (_session is not null && await PersistAsync(ScheduleEditing.Finish(_session) with { InPlay = true }))
         {
             Navigation.NavigateTo("play");
         }
     }
+    private string OptionsMessage
+    {
+        get
+        {
+            if (_session is null || _held is null)
+            {
+                return string.Empty;
+            }
+
+            Round round = _session.Rounds[_held.Round];
+            if (round.Complete)
+            {
+                return $"Round {_held.Round + 1} is complete, so nothing in it can be changed.";
+            }
+
+            if (ScheduleEditing.GameAt(_session, _held)?.Complete == true)
+            {
+                return "This game is complete, so it can't be changed.";
+            }
+
+            return round.Pinned.Contains(_held.Player)
+                ? "Pinned in this game: re-scheduling won't move them and they can't be swapped."
+                : ScheduleEditing.GameAt(_session, _held) is null ? $"Sitting out in round {_held.Round + 1}." : $"Round {_held.Round + 1}.";
+        }
+    }
+
+    private async Task ToggleEditAsync()
+    {
+        if (_session is not null)
+        {
+            await PersistAsync(_session.Editing ? ScheduleEditing.Finish(_session) : _session with { Editing = true });
+            _swap = null;
+            _message = null;
+        }
+    }
+
+    private async Task HoldAsync(PlayerPosition position)
+    {
+        if (_session is not { Editing: true } || _busy)
+        {
+            return;
+        }
+
+        _held = position;
+        await InvokeAsync(StateHasChanged);
+        await JavaScript.InvokeVoidAsync("tennisDialogs.show", _optionsDialog);
+    }
+
+    private async Task CloseOptionsAsync() => await JavaScript.InvokeVoidAsync("tennisDialogs.close", _optionsDialog);
+
+    private async Task PinAsync()
+    {
+        if (_session is not null && _held is not null)
+        {
+            if (await PersistAsync(ScheduleEditing.Pin(_session, _held)))
+            {
+                _message = $"{ScheduleEditing.Name(_session, _held.Player)} {(_session.Rounds[_held.Round].Pinned.Contains(_held.Player) ? "pinned" : "unpinned")}.";
+                await CloseOptionsAsync();
+            }
+        }
+    }
+
+    private async Task BeginSwapAsync()
+    {
+        _swap = _held;
+        _message = null;
+        await CloseOptionsAsync();
+    }
+
+    private async Task TapAsync(PlayerPosition position)
+    {
+        if (_session is null || _swap is null || _busy)
+        {
+            return;
+        }
+
+        _message = ScheduleEditing.SwapError(_session, _swap, position);
+        if (_message is null && await PersistAsync(ScheduleEditing.Swap(_session, _swap, position)))
+        {
+            _message = $"Swapped {ScheduleEditing.Name(_session, _swap.Player)} and {ScheduleEditing.Name(_session, position.Player)}.";
+            _swap = null;
+        }
+    }
+
+    private async Task RescheduleAsync()
+    {
+        if (_session is null || _busy)
+        {
+            return;
+        }
+
+        _swap = null;
+        _choices.Clear();
+        _moves.Clear();
+        await NextConflictAsync();
+    }
+
+    private async Task NextConflictAsync()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _conflict = ScheduleEditing.CompletedConflict(_session, [.. _choices]);
+        if (_conflict is not null)
+        {
+            await InvokeAsync(StateHasChanged);
+            await JavaScript.InvokeVoidAsync("tennisDialogs.show", _conflictDialog);
+            return;
+        }
+
+        await RepairAsync([.. _moves]);
+    }
+
+    private async Task CloseConflictAsync() => await JavaScript.InvokeVoidAsync("tennisDialogs.close", _conflictDialog);
+
+    private async Task AcceptAsync()
+    {
+        if (_session is not null && _conflict is not null && await PersistAsync(ScheduleEditing.Accept(_session, _conflict)))
+        {
+            await CloseConflictAsync();
+            await NextConflictAsync();
+        }
+    }
+
+    private async Task ResolveAsync(Guid id)
+    {
+        if (_conflict is not null)
+        {
+            _choices.Add(_conflict);
+            _moves.Add(new(_conflict.Round, id));
+            await CloseConflictAsync();
+            await NextConflictAsync();
+        }
+    }
+
+    private async Task RepairAsync(PlayerPosition[] mustMove)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        await Task.Delay(1); // Yield a paint before WebAssembly computation.
+        try
+        {
+            ScheduleRepairResult result = ScheduleEngine.Repair(_session, 0, mustMove);
+            if (!result.Succeeded)
+            {
+                Guid[]? pair = _session.Rounds.SelectMany((round, index) => round.Games.SelectMany(game => new[] { game.Left, game.Right })
+                    .Where(side => side.Length == 2 && ScheduleEditing.Repeated(_session, index, side[0]))).FirstOrDefault();
+                _message = pair is null ? "Couldn't re-schedule while preserving fixed positions and the schedule rules."
+                    : $"Couldn't separate {ScheduleEditing.Name(_session, pair[0])} & {ScheduleEditing.Name(_session, pair[1])}: pinned players are in the way.";
+                return;
+            }
+
+            Session repaired = result.Session;
+            int moved = repaired.Rounds.Select((round, index) => round.Games.SelectMany(game => game.Left.Concat(game.Right)).Concat(round.SittingOut)
+                .Zip(_session.Rounds[index].Games.SelectMany(game => game.Left.Concat(game.Right)).Concat(_session.Rounds[index].SittingOut))
+                .Count(pair => pair.First != pair.Second)).Sum();
+            if (await PersistAsync(repaired))
+            {
+                _message = moved == 0 ? "Nothing needed changing." : $"Re-scheduled: {moved} players moved (shown in blue).";
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
 }

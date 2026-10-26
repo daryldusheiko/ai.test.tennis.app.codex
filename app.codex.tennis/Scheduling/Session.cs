@@ -11,6 +11,9 @@ namespace SocialTennis.Scheduling;
 /// <param name="InPlay">Whether Play has been pressed.</param>
 public sealed record Session(int Version, ScheduleStep Step, int[] Courts, Player[] Players, Round[] Rounds, bool InPlay)
 {
+    /// <summary>Gets a value indicating whether player editing is active.</summary>
+    public bool Editing { get; init; }
+
     /// <summary>Gets a new court-selection session.</summary>
     public static Session Empty => new(1, ScheduleStep.Courts, [], [], [], false);
 }

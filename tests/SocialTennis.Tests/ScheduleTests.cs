@@ -21,6 +21,8 @@ public sealed class ScheduleTests
                     Player[] players = Players(count);
                     Round[] rounds = ScheduleEngine.Generate(players, courts, seed);
                     Check(players, courts, rounds, $"{count} players, {courts} courts, seed {seed}");
+                    var session = new Session(1, ScheduleStep.Review, [.. Enumerable.Range(1, courts)], players, rounds, false);
+                    Assert.That(ScheduleEngine.Repair(session, seed).Session.Rounds, Is.SameAs(rounds), "Valid schedules need no repair.");
                 }
             }
         }

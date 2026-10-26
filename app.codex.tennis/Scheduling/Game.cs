@@ -5,4 +5,11 @@ namespace SocialTennis.Scheduling;
 /// <param name="Right">Right side player identities.</param>
 /// <param name="RankConflict">Whether singles ranks conflict.</param>
 /// <param name="Complete">Whether the game is complete.</param>
-public sealed record Game(Guid[] Left, Guid[] Right, bool RankConflict = false, bool Complete = false);
+public sealed record Game(Guid[] Left, Guid[] Right, bool RankConflict = false, bool Complete = false)
+{
+    /// <summary>Gets a value indicating whether the left partnership repeat was accepted.</summary>
+    public bool AcceptedLeft { get; init; }
+
+    /// <summary>Gets a value indicating whether the right partnership repeat was accepted.</summary>
+    public bool AcceptedRight { get; init; }
+}

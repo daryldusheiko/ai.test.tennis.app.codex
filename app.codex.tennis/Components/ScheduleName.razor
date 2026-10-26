@@ -1,0 +1,46 @@
+@if (Editing)
+{
+    <button class="player-name @Colour" data-player="@Id" aria-label="@Name" @onclick="() => OnTap.InvokeAsync(new(Round, Id))" @onkeydown="KeyAsync" @oncontextmenu:preventDefault>
+        <i class="rank rank-@(Player.Rank ?? 0)" aria-hidden="true"></i>@Name@if (Pinned) { <span aria-label="Pinned"> 📌</span> }
+    </button>
+}
+else
+{
+    <span class="player-label @Colour">
+        @if (Review)
+        {
+            <i class="rank rank-@(Player.Rank ?? 0)" role="img" aria-label="@(Player.Rank is int rank ? $"Rank {rank}" : "No rank")"></i>
+        }
+        @Name@if (Pinned) { <span aria-label="Pinned"> 📌</span> }
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Session Session { get; set; } = Session.Empty;
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public int Round { get; set; }
+
+    [Parameter]
+    public bool Review { get; set; }
+
+    [Parameter]
+    public bool Editing { get; set; }
+
+    [Parameter]
+    public EventCallback<PlayerPosition> OnTap { get; set; }
+
+    [Parameter]
+    public EventCallback<PlayerPosition> OnHold { get; set; }
+
+    private Player Player => Session.Players.First(player => player.Id == Id);
+    private string Name => Player.FullName;
+    private bool Pinned => Session.Rounds[Round].Pinned.Contains(Id);
+    private string? Colour => !Review ? null : (ScheduleEditing.Repeated(Session, Round, Id) || ScheduleEditing.GameAt(Session, new(Round, Id))?.RankConflict == true) ? "conflict" : Session.Rounds[Round].Moved.Contains(Id) ? "moved" : null;
+
+    private Task KeyAsync(KeyboardEventArgs args) => args.Key == "Enter" ? OnHold.InvokeAsync(new(Round, Id)) : Task.CompletedTask;
+}
