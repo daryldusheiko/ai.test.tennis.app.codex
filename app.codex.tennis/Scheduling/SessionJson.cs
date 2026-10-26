@@ -33,15 +33,17 @@ public static class SessionJson
         HashSet<Guid> players = [.. session.Players.Select(player => player.Id)];
         foreach (Round round in session.Rounds)
         {
-            if (round is null || round.Games is null || round.SittingOut is null ||
+            if (round is null || round.Games is null || round.SittingOut is null || round.Pinned is null || round.Moved is null || round.Edited is null ||
                 round.Games.Any(game => game is null || game.Left is null || game.Right is null ||
-                    game.Left.Length is < 1 or > 2 || game.Right.Length is < 1 or > 2))
+                    game.Left.Length is < 1 or > 2 || game.Right.Length is < 1 or > 2 ||
+                    (game.AcceptedLeft && game.Left.Length != 2) || (game.AcceptedRight && game.Right.Length != 2)))
             {
                 throw new JsonException("Schedule storage contains an incomplete round.");
             }
 
             Guid[] participants = [.. round.Games.SelectMany(game => game.Left.Concat(game.Right)), .. round.SittingOut];
-            if (participants.Length != players.Count || !players.SetEquals(participants) || round.Games.Length > session.Courts.Length)
+            if (round.Pinned.Concat(round.Moved).Concat(round.Edited).Any(id => !players.Contains(id)) ||
+                round.Pinned.Any(id => round.SittingOut.Contains(id)) || participants.Length != players.Count || !players.SetEquals(participants) || round.Games.Length > session.Courts.Length)
             {
                 throw new JsonException("Schedule storage contains invalid player positions.");
             }

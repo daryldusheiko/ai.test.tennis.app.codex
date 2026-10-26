@@ -1,7 +1,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JavaScript
 
-<div @ref="_element" class="schedule-cards">
+<div @ref="_element" class="schedule-cards" data-editing="@(Session.Editing && Review ? "true" : "false")">
     @for (int roundIndex = 0; roundIndex < Session.Rounds.Length; roundIndex++)
     {
         int index = roundIndex;
@@ -9,7 +9,7 @@
         <section class="round-card card" data-round="@index" aria-label="@($"Round {index + 1}")">
             <header class="round-header">
                 <h2>Round @(index + 1)</h2>
-                @if (Review && !round.Complete && !round.Games.Any(game => game.Complete))
+                @if (Review && !Session.Editing && !round.Complete && !round.Games.Any(game => game.Complete))
                 {
                     <button class="drag-handle" data-handle="round" aria-label="@($"Move round {index + 1}")" @onkeydown="args => MoveKeyAsync(args, index, -1)">||</button>
                 }
@@ -27,30 +27,18 @@
                         <div class="side">
                             @foreach (Guid id in game.Left)
                             {
-                                <span>
-                                    @if (Review)
-                                    {
-                                        <i class="rank rank-@(Rank(id) ?? 0)" role="img" aria-label="@(Rank(id) is int rank ? $"Rank {rank}" : "No rank")"></i>
-                                    }
-                                    @Name(id)
-                                </span>
+                                <ScheduleName Session="Session" Id="id" Round="index" Review="Review" Editing="@(Review && Session.Editing)" OnTap="OnTap" OnHold="OnHold" />
                             }
                         </div>
                         <span class="versus">v</span>
                         <div class="side">
                             @foreach (Guid id in game.Right)
                             {
-                                <span>
-                                    @if (Review)
-                                    {
-                                        <i class="rank rank-@(Rank(id) ?? 0)" role="img" aria-label="@(Rank(id) is int rank ? $"Rank {rank}" : "No rank")"></i>
-                                    }
-                                    @Name(id)
-                                </span>
+                                <ScheduleName Session="Session" Id="id" Round="index" Review="Review" Editing="@(Review && Session.Editing)" OnTap="OnTap" OnHold="OnHold" />
                             }
                         </div>
                     </div>
-                    @if (Review && !round.Complete && !game.Complete)
+                    @if (Review && !Session.Editing && !round.Complete && !game.Complete)
                     {
                         <button class="drag-handle" data-handle="game" aria-label="@($"Move game {position + 1} in round {index + 1}")" @onkeydown="args => MoveKeyAsync(args, index, position)">||</button>
                     }
@@ -58,7 +46,14 @@
             }
             @if (round.SittingOut.Length > 0)
             {
-                <p class="sitting-out">Sitting out: @string.Join(", ", round.SittingOut.Select(Name))</p>
+                <div class="sitting-out">Sitting out:
+                    @for (int sittingIndex = 0; sittingIndex < round.SittingOut.Length; sittingIndex++)
+                    {
+                        Guid id = round.SittingOut[sittingIndex];
+                        @if (sittingIndex > 0) { <span>, </span> }
+                        <ScheduleName Session="Session" Id="id" Round="index" Review="Review" Editing="@(Review && Session.Editing)" OnTap="OnTap" OnHold="OnHold" />
+                    }
+                </div>
             }
         </section>
     }
@@ -73,6 +68,15 @@
 
     [Parameter]
     public EventCallback<Session> OnReorder { get; set; }
+
+    [Parameter]
+    public EventCallback<PlayerPosition> OnTap { get; set; }
+
+    [Parameter]
+    public EventCallback<PlayerPosition> OnHold { get; set; }
+
+    [JSInvokable]
+    public Task HoldAsync(int round, string player) => Session.Editing ? OnHold.InvokeAsync(new(round, Guid.Parse(player))) : Task.CompletedTask;
 
     private ElementReference _element;
     private DotNetObjectReference<ScheduleCards>? _reference;
@@ -89,6 +93,11 @@
     [JSInvokable]
     public async Task MoveAsync(int round, int game, int target)
     {
+        if (Session.Editing)
+        {
+            return;
+        }
+
         Session updated = ScheduleOrder.Move(Session, round, game, target);
         if (!ReferenceEquals(updated, Session))
         {
@@ -103,16 +112,6 @@
             await JavaScript.InvokeVoidAsync("tennisSchedule.detach", _element);
             _reference.Dispose();
         }
-    }
-
-    private int? Rank(Guid id)
-    {
-        return Session.Players.First(player => player.Id == id).Rank;
-    }
-
-    private string Name(Guid id)
-    {
-        return Session.Players.First(player => player.Id == id).FullName;
     }
 
     private Task MoveKeyAsync(KeyboardEventArgs args, int round, int game)
