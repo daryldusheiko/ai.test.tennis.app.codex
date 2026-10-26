@@ -1,11 +1,18 @@
 .round-card { padding: .85rem; }
 .round-header { display: flex; align-items: center; justify-content: space-between; }
 .round-header h2 { margin: .25rem 0 .75rem; }
+.round-status { margin-left: auto; margin-right: .5rem; font-weight: 700; }
 .game { display: flex; align-items: center; gap: .35rem; border-top: 1px solid var(--border); padding: .75rem 0; }
 .match { display: grid; grid-template-columns: minmax(0, 1fr) 1rem minmax(0, 1fr); flex: 1; align-items: center; gap: .25rem; min-width: 0; }
 .side { display: flex; flex-direction: column; align-items: flex-start; justify-self: center; max-width: 100%; }
 .versus { text-align: center; color: var(--muted); }
-.court { font-size: .8rem; font-weight: 700; width: 2.6rem; flex-shrink: 0; }
+.court { position: relative; display: grid; place-items: center; width: 3rem; height: 3rem; flex-shrink: 0; border-radius: 50%; background: #1757a0; overflow: hidden; color: #fff; }
+.court.in-play { background: #176c36; }
+.court.complete { background: #555; }
+.court::before, .court::after { content: ""; position: absolute; top: -10%; width: 70%; height: 120%; border: 2px solid #ffffffb3; border-radius: 50%; }
+.court::before { left: -65%; }
+.court::after { right: -65%; }
+.court span { font-size: 2rem; line-height: 1; font-weight: 800; -webkit-text-stroke: .5px #142433; paint-order: stroke fill; }
 .drag-handle { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; flex-shrink: 0; min-width: 36px; padding: .4rem; cursor: grab; }
 .sitting-out { font-size: .9rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: .75rem; }
 .rank-conflict { color: var(--danger); }

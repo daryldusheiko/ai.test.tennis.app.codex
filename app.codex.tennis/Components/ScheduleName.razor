@@ -38,7 +38,7 @@ else
     public EventCallback<PlayerPosition> OnHold { get; set; }
 
     private Player Player => Session.Players.First(player => player.Id == Id);
-    private string Name => Player.FullName;
+    private string Name => Review ? Player.FullName : ScheduleDisplay.Name(Session.Players, Id);
     private bool Pinned => Session.Rounds[Round].Pinned.Contains(Id);
     private string? Colour => !Review ? null : (ScheduleEditing.Repeated(Session, Round, Id) || ScheduleEditing.GameAt(Session, new(Round, Id))?.RankConflict == true) ? "conflict" : Session.Rounds[Round].Moved.Contains(Id) ? "moved" : null;
 
