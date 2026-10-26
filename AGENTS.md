@@ -110,6 +110,8 @@ Record every new abstraction, dependency or unspecified design choice with its r
 
 ## Decision Log
 
+- VS Code solution selection: `.vscode/settings.json` selects `SocialTennis.slnx` explicitly so C# Dev Kit uses the maintained solution instead of a cached generated solution referencing the removed `Codex.Tennis.App` folder. If an existing window retains old diagnostics, run Developer: Reload Window.
+
 - Documentation alignment: authoritative inputs are in `app.codex.tennis/docs/`, and the app is `app.codex.tennis/app.codex.tennis.csproj`. References to `doc/` or `Codex.Tennis.App/` do not match this checkout. Existing starter structure and port are distinguished from required infrastructure so they are not treated as standards exceptions.
 
 - Task 1 dependencies: StyleCop.Analyzers 1.2.0-beta.556 and its Unstable 1.2.0.556 implementation (MIT) support modern C# syntax; NUnit 4.5.1, NUnit3TestAdapter 6.2.0, Microsoft.NET.Test.Sdk 18.4.0 and Microsoft.Playwright 1.63.0 (all MIT) provide separate browser tests. Exact installed NuGet metadata was checked for licence compatibility. No UI framework or external artwork is needed; the tennis-ball PNGs and navigation SVGs are original.
