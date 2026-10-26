@@ -1,5 +1,6 @@
 @page "/play"
 @inject IScheduleStorage Storage
+@inject IJSRuntime JavaScript
 
 <PageTitle>Social Tennis</PageTitle>
 <header><p class="eyebrow">SOCIAL TENNIS</p><h1>Play</h1></header>
@@ -7,16 +8,43 @@
 {
     <p role="alert">@_error</p>
 }
-else if (!_loaded)
+@if (!_loaded && _error is null)
 {
     <p role="status">Loading…</p>
 }
 else if (_session is { InPlay: true })
 {
-    <ScheduleCards Session="_session" />
+    <ScheduleCards Session="_session" OnRoundAction="OpenRoundAsync" />
+    <dialog @ref="_roundDialog" aria-labelledby="round-title">
+        <div class="dialog-content">
+            <h2 id="round-title">Round @(_round + 1)</h2>
+            @if (_round >= 0 && _round < _session.Rounds.Length)
+            {
+                Round round = _session.Rounds[_round];
+                int active = Array.FindIndex(_session.Rounds, item => item.InPlay);
+                <p role="status">@(round.InPlay ? "In play." : active >= 0 ? $"Round {active + 1} is in play. Finish or cancel it before starting another." : "Not started yet.")</p>
+                <div class="actions">
+                    @if (round.InPlay)
+                    {
+                        <button disabled="@_busy" @onclick="() => ChangeRoundAsync(RoundControl.Finish)">Finish round</button>
+                        <button disabled="@_busy" @onclick="() => ChangeRoundAsync(RoundControl.Cancel)">Cancel round</button>
+                    }
+                    else
+                    {
+                        <button disabled="@(_busy || active >= 0)" @onclick="() => ChangeRoundAsync(RoundControl.Start)">Start round</button>
+                    }
+                    <button disabled="@_busy" @onclick="CloseRoundAsync">Close</button>
+                </div>
+                @if (_error is not null)
+                {
+                    <p role="alert">@_error</p>
+                }
+            }
+        </div>
+    </dialog>
     <a class="button-link" href="schedule">Edit</a>
 }
-else
+else if (_loaded)
 {
     <section class="card">
         <h2>No schedule in play.</h2>
@@ -25,9 +53,49 @@ else
 }
 
 @code {
+    private ElementReference _roundDialog;
+    private int _round = -1;
+    private bool _busy;
     private Session? _session;
     private bool _loaded;
     private string? _error;
+
+    private async Task OpenRoundAsync(int round)
+    {
+        _round = round;
+        await JavaScript.InvokeVoidAsync("tennisDialogs.show", _roundDialog);
+    }
+
+    private async Task CloseRoundAsync()
+    {
+        await JavaScript.InvokeVoidAsync("tennisDialogs.close", _roundDialog);
+    }
+
+    private async Task ChangeRoundAsync(Func<Session, int, Session> change)
+    {
+        if (_session is null || _busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            Session updated = change(_session, _round);
+            await Storage.SaveAsync(updated);
+            _session = updated;
+            _error = null;
+            await CloseRoundAsync();
+        }
+        catch (JSException)
+        {
+            _error = "Couldn't save the schedule. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

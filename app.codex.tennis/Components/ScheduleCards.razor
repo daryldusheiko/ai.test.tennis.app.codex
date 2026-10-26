@@ -9,6 +9,11 @@
         <section class="round-card card" data-round="@index" aria-label="@($"Round {index + 1}")">
             <header class="round-header">
                 <h2>Round @(index + 1)</h2>
+                @if (!Review)
+                {
+                    <span class="round-status">@(round.Complete ? "Complete" : round.InPlay ? "In play" : null)</span>
+                    <button class="round-action" aria-label="@($"Round {index + 1} actions")" disabled="@round.Complete" @onclick="() => OnRoundAction.InvokeAsync(index)">⋮</button>
+                }
                 @if (Review && !Session.Editing && !round.Complete && !round.Games.Any(game => game.Complete))
                 {
                     <button class="drag-handle" data-handle="round" aria-label="@($"Move round {index + 1}")" @onkeydown="args => MoveKeyAsync(args, index, -1)">||</button>
@@ -21,7 +26,7 @@
                 <div class="game @(game.RankConflict ? "rank-conflict" : null)" data-game="@position">
                     @if (!Review)
                     {
-                        <span class="court">Court @Session.Courts[position]</span>
+                        <span class="court @(round.Complete ? "complete" : round.InPlay ? "in-play" : "not-started")" role="img" aria-label="@($"Court {Session.Courts[position]}")"><span style="font-size: @(CourtFontSize(Session.Courts[position]))rem">@Session.Courts[position]</span></span>
                     }
                     <div class="match">
                         <div class="side">
@@ -67,6 +72,9 @@
     public bool Review { get; set; }
 
     [Parameter]
+    public EventCallback<int> OnRoundAction { get; set; }
+
+    [Parameter]
     public EventCallback<Session> OnReorder { get; set; }
 
     [Parameter]
@@ -77,6 +85,8 @@
 
     [JSInvokable]
     public Task HoldAsync(int round, string player) => Session.Editing ? OnHold.InvokeAsync(new(round, Guid.Parse(player))) : Task.CompletedTask;
+
+    private static string CourtFontSize(int court) => Math.Min(2, 4.3 / court.ToString(System.Globalization.CultureInfo.InvariantCulture).Length).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     private ElementReference _element;
     private DotNetObjectReference<ScheduleCards>? _reference;

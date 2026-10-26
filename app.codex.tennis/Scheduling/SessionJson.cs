@@ -30,6 +30,11 @@ public static class SessionJson
             throw new JsonException("Schedule storage contains an incomplete session.");
         }
 
+        if (session.Rounds.Count(round => round is { InPlay: true }) > 1 || session.Rounds.Any(round => round is { InPlay: true, Complete: true }))
+        {
+            throw new JsonException("Schedule storage contains invalid active rounds.");
+        }
+
         HashSet<Guid> players = [.. session.Players.Select(player => player.Id)];
         foreach (Round round in session.Rounds)
         {
